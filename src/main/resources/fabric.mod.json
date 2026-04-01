@@ -1,0 +1,26 @@
+{
+	"schemaVersion": 1,
+	"id": "aschat",
+	"version": "${version}",
+	"name": "AS Chat",
+	"description": "Adds a client-only /as channel that relays through an external AS Chat service.",
+	"authors": [
+		"Codex"
+	],
+	"contact": {
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "CC0-1.0",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"com.example.aschat.client.AsChatClientMod"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.18.1",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}

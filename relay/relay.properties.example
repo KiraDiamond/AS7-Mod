@@ -1,0 +1,6 @@
+port=25565
+auth_token=
+allow_users=
+log_messages=true
+playtime_db_path=/path/to/wynncraft_playtime.db
+playtime_sql=SELECT COALESCE(ROUND(SUM(playtime_hours) * 60, 0), 0) FROM daily_playtime WHERE username = ? COLLATE NOCASE AND date >= date('now', '-13 days')
