@@ -96,6 +96,8 @@ public final class AsChatConfig {
             filteredWords);
     if (!config.matchesPersistedProperties(properties)) {
       config.save();
+    } else if (Files.exists(path)) {
+      restrictOwnerOnly(path);
     }
     return config;
   }

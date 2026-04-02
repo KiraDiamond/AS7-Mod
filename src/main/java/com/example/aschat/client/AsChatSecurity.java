@@ -17,7 +17,10 @@ import java.util.regex.Pattern;
 import javax.net.ssl.SSLException;
 
 final class AsChatSecurity {
-  static final int MAX_RELAY_RESPONSE_BYTES = 64 * 1024;
+  // The bundled relay can emit 200 backlog entries with 64-char senders and 256-char messages.
+  // URL encoding can expand non-ASCII characters significantly, so keep a conservative cap above
+  // the relay's legitimate worst case rather than rejecting valid backlogs.
+  static final int MAX_RELAY_RESPONSE_BYTES = 1024 * 1024;
   static final int MAX_PLAYTIME_RESPONSE_BYTES = 256;
   static final int MAX_RELAY_MESSAGES_PER_BATCH = 200;
   static final int MAX_RELAY_MESSAGE_LENGTH = 256;
@@ -280,8 +283,20 @@ final class AsChatSecurity {
       if (!isValid()) {
         throw new RelayConfigurationException();
       }
-      return baseUri.resolve(relativePathAndQuery);
+      return baseUri.resolve(stripLeadingSlashes(relativePathAndQuery));
     }
+  }
+
+  private static String stripLeadingSlashes(String value) {
+    if (value == null || value.isEmpty()) {
+      return "";
+    }
+
+    int index = 0;
+    while (index < value.length() && value.charAt(index) == '/') {
+      index++;
+    }
+    return value.substring(index);
   }
 
   static final class RelayNotConfiguredException extends IllegalStateException {}

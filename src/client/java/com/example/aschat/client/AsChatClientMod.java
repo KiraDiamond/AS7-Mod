@@ -407,7 +407,7 @@ public class AsChatClientMod implements ClientModInitializer {
                 .append(PREFIX_DIVIDER.copy())
                 .append(normalText(sender, ChatFormatting.GREEN))
                 .append(normalText(": ", ChatFormatting.GRAY))
-                .append(normalText(message)));
+                .append(normalText(message, ChatFormatting.GREEN)));
   }
 
   public static void showInfoLine(String message) {

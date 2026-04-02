@@ -23,6 +23,9 @@ class AsChatSecurityTest {
     assertEquals(
         URI.create("https://relay.example.com/aschat/playtime?player=test"),
         endpoint.resolve("playtime?player=test"));
+    assertEquals(
+        URI.create("https://relay.example.com/aschat/messages"),
+        endpoint.resolve("/messages"));
   }
 
   @Test
@@ -109,5 +112,21 @@ class AsChatSecurityTest {
     assertEquals(
         "received HTTP 404",
         AsChatSecurity.describeLookupFailure(new AsChatSecurity.HttpStatusException(404)));
+  }
+
+  @Test
+  void relayResponseCapCoversTheBundledRelayBacklog() {
+    int relayMaxMessages = 200;
+    int relayMaxSenderLength = 64;
+    int relayMaxMessageLength = 256;
+    int maxEncodedCharsPerChar = 12;
+    int perMessageOverhead = 32;
+    int conservativeWorstCaseBytes =
+        relayMaxMessages
+            * (perMessageOverhead
+                + (relayMaxSenderLength * maxEncodedCharsPerChar)
+                + (relayMaxMessageLength * maxEncodedCharsPerChar));
+
+    assertTrue(AsChatSecurity.MAX_RELAY_RESPONSE_BYTES >= conservativeWorstCaseBytes);
   }
 }
