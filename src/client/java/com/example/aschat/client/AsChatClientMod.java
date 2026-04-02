@@ -273,7 +273,9 @@ public class AsChatClientMod implements ClientModInitializer {
                 runOnClient(
                     () -> {
                       if (throwable != null) {
-                        showSystemMessage("AST guild lookup failed: " + rootMessage(throwable));
+                        showSystemMessage(
+                            "AST guild lookup failed: "
+                                + AsChatSecurity.describeLookupFailure(throwable));
                         return;
                       }
 
@@ -301,7 +303,9 @@ public class AsChatClientMod implements ClientModInitializer {
                 runOnClient(
                     () -> {
                       if (throwable != null) {
-                        showSystemMessage("AST player lookup failed: " + rootMessage(throwable));
+                        showSystemMessage(
+                            "AST player lookup failed: "
+                                + AsChatSecurity.describeLookupFailure(throwable));
                         return;
                       }
 
@@ -325,7 +329,9 @@ public class AsChatClientMod implements ClientModInitializer {
                 runOnClient(
                     () -> {
                       if (throwable != null) {
-                        showSystemMessage("AST playtime lookup failed: " + rootMessage(throwable));
+                        showSystemMessage(
+                            "AST playtime lookup failed: "
+                                + AsChatSecurity.describeLookupFailure(throwable));
                         return;
                       }
 
@@ -401,7 +407,7 @@ public class AsChatClientMod implements ClientModInitializer {
                 .append(PREFIX_DIVIDER.copy())
                 .append(normalText(sender, ChatFormatting.GREEN))
                 .append(normalText(": ", ChatFormatting.GRAY))
-                .append(normalText(message)));
+                .append(normalText(message, ChatFormatting.GREEN)));
   }
 
   public static void showInfoLine(String message) {
@@ -488,16 +494,6 @@ public class AsChatClientMod implements ClientModInitializer {
   public static void runOnClient(Runnable runnable) {
     Minecraft client = Minecraft.getInstance();
     client.execute(runnable);
-  }
-
-  public static String rootMessage(Throwable throwable) {
-    Throwable current = throwable;
-    while (current.getCause() != null) {
-      current = current.getCause();
-    }
-
-    String message = current.getMessage();
-    return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
   }
 
   private static String formatSince(Instant instant) {

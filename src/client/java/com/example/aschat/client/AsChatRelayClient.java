@@ -5,6 +5,8 @@ import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -40,7 +42,7 @@ public class AsChatRelayClient {
         .thenAccept(
             response -> {
               if (response.statusCode() >= 400) {
-                throw new IllegalStateException("Relay returned HTTP " + response.statusCode());
+                throw new AsChatSecurity.HttpStatusException(response.statusCode());
               }
             });
   }
@@ -54,14 +56,19 @@ public class AsChatRelayClient {
             .build();
 
     return httpClient
-        .sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+        .sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
         .thenApply(
             response -> {
-              if (response.statusCode() >= 400) {
-                throw new IllegalStateException("Relay returned HTTP " + response.statusCode());
-              }
+              try (InputStream body = response.body()) {
+                if (response.statusCode() >= 400) {
+                  throw new AsChatSecurity.HttpStatusException(response.statusCode());
+                }
 
-              return parseMessages(response.body());
+                return parseMessages(
+                    readBody(body, AsChatSecurity.MAX_RELAY_RESPONSE_BYTES));
+              } catch (IOException exception) {
+                throw new IllegalStateException("Failed to read relay response", exception);
+              }
             });
   }
 
@@ -75,23 +82,29 @@ public class AsChatRelayClient {
             .build();
 
     return httpClient
-        .sendAsync(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+        .sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
         .thenApply(
             response -> {
-              if (response.statusCode() >= 400) {
-                throw new IllegalStateException("Relay returned HTTP " + response.statusCode());
-              }
+              try (InputStream body = response.body()) {
+                if (response.statusCode() >= 400) {
+                  throw new AsChatSecurity.HttpStatusException(response.statusCode());
+                }
 
-              try {
-                return Integer.parseInt(response.body().trim());
-              } catch (NumberFormatException exception) {
-                throw new IllegalStateException("Relay returned invalid playtime data");
+                try {
+                  return Integer.parseInt(
+                      readBody(body, AsChatSecurity.MAX_PLAYTIME_RESPONSE_BYTES).trim());
+                } catch (NumberFormatException exception) {
+                  throw new AsChatSecurity.InvalidRelayResponseException(
+                      "Relay returned invalid playtime data");
+                }
+              } catch (IOException exception) {
+                throw new IllegalStateException("Failed to read relay response", exception);
               }
             });
   }
 
   private URI endpoint(String pathAndQuery) {
-    return URI.create(config.relayUrl() + pathAndQuery);
+    return config.relayEndpoint().resolve(pathAndQuery);
   }
 
   private static String formField(String key, String value) {
@@ -110,6 +123,9 @@ public class AsChatRelayClient {
 
     String[] lines = body.split("\\R");
     for (String line : lines) {
+      if (messages.size() >= AsChatSecurity.MAX_RELAY_MESSAGES_PER_BATCH) {
+        break;
+      }
       if (line.isBlank()) {
         continue;
       }
@@ -121,14 +137,37 @@ public class AsChatRelayClient {
 
       try {
         long id = Long.parseLong(parts[0]);
-        String sender = java.net.URLDecoder.decode(parts[1], StandardCharsets.UTF_8);
-        String message = java.net.URLDecoder.decode(parts[2], StandardCharsets.UTF_8);
+        if (id <= 0) {
+          continue;
+        }
+
+        String sender =
+            AsChatSecurity.sanitizeInboundText(
+                java.net.URLDecoder.decode(parts[1], StandardCharsets.UTF_8));
+        String message =
+            AsChatSecurity.sanitizeInboundText(
+                java.net.URLDecoder.decode(parts[2], StandardCharsets.UTF_8));
+        if (!AsChatSecurity.isValidRelaySender(sender)
+            || sender.length() > AsChatSecurity.MAX_RELAY_SENDER_LENGTH
+            || message.isEmpty()
+            || message.length() > AsChatSecurity.MAX_RELAY_MESSAGE_LENGTH) {
+          continue;
+        }
+
         messages.add(new RelayMessage(id, sender, message));
       } catch (IllegalArgumentException ignored) {
       }
     }
 
     return messages;
+  }
+
+  private static String readBody(InputStream inputStream, int maxBytes) throws IOException {
+    byte[] bytes = inputStream.readNBytes(maxBytes + 1);
+    if (bytes.length > maxBytes) {
+      throw new AsChatSecurity.InvalidRelayResponseException("Relay response exceeded size limit");
+    }
+    return new String(bytes, StandardCharsets.UTF_8);
   }
 
   public record RelayMessage(long id, String sender, String message) {}

@@ -2,8 +2,10 @@ package com.example.aschat.client;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import net.minecraft.client.Minecraft;
 
@@ -108,8 +110,18 @@ public class AsChatState {
       handlePollResult();
     }
 
+    if (!config.hasRelayUrl()) {
+      return;
+    }
+
     if (ticksUntilPoll > 0) {
       ticksUntilPoll--;
+      return;
+    }
+
+    if (!config.hasValidRelayEndpoint()) {
+      reportPollFailure("relay URL is invalid");
+      ticksUntilPoll = config.pollIntervalTicks();
       return;
     }
 
@@ -133,7 +145,10 @@ public class AsChatState {
                 (ignored, throwable) -> {
                   if (throwable != null) {
                     AsChatClientMod.runOnClient(
-                        () -> reportSendFailure(AsChatClientMod.rootMessage(throwable)));
+                        () ->
+                            reportSendFailure(
+                                AsChatSecurity.describeRelayFailure(
+                                    throwable, config.authToken())));
                   } else {
                     lastSendError = "";
                   }
@@ -149,18 +164,22 @@ public class AsChatState {
         AsChatClientMod.showSystemMessage("AS7 relay connection restored.");
       }
 
-      boolean initialReplay = latestMessageId == 0;
+      long previousLatestMessageId = latestMessageId;
+      long maxSeenMessageId = latestMessageId;
+      boolean initialReplay = previousLatestMessageId == 0;
       int startIndex =
           initialReplay && messages.size() > INITIAL_REPLAY_LIMIT
               ? messages.size() - INITIAL_REPLAY_LIMIT
               : 0;
-
-      for (AsChatRelayClient.RelayMessage message : messages) {
-        latestMessageId = Math.max(latestMessageId, message.id());
-      }
+      Set<Long> seenMessageIds = new HashSet<>();
 
       for (int index = startIndex; index < messages.size(); index++) {
         AsChatRelayClient.RelayMessage message = messages.get(index);
+        if (message.id() <= previousLatestMessageId || !seenMessageIds.add(message.id())) {
+          continue;
+        }
+
+        maxSeenMessageId = Math.max(maxSeenMessageId, message.id());
         rememberUsername(message.sender());
         if (!config.showsAsChat() || config.isIgnored(message.sender())) {
           continue;
@@ -168,8 +187,10 @@ public class AsChatState {
 
         AsChatClientMod.showRelayMessage(message.sender(), message.message());
       }
+
+      latestMessageId = maxSeenMessageId;
     } catch (RuntimeException exception) {
-      reportPollFailure(AsChatClientMod.rootMessage(exception));
+      reportPollFailure(AsChatSecurity.describeRelayFailure(exception, config.authToken()));
     } finally {
       inFlightPoll = null;
     }

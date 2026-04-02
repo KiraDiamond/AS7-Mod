@@ -31,8 +31,7 @@ public class AstLookupClient {
         .thenApply(
             response -> {
               if (response.statusCode() >= 400) {
-                throw new IllegalStateException(
-                    "Wynncraft API returned HTTP " + response.statusCode());
+                throw new AsChatSecurity.HttpStatusException(response.statusCode());
               }
 
               return parsePlayerSummary(response.body(), username);
@@ -40,18 +39,24 @@ public class AstLookupClient {
   }
 
   private static PlayerSummary parsePlayerSummary(String body, String requestedUsername) {
-    JsonElement root = JsonParser.parseString(body);
+    JsonElement root;
+    try {
+      root = JsonParser.parseString(body);
+    } catch (RuntimeException exception) {
+      throw new AsChatSecurity.InvalidLookupResponseException(
+          "Unexpected Wynncraft API response");
+    }
     if (!root.isJsonObject()) {
-      throw new IllegalStateException("Unexpected Wynncraft API response");
+      throw new AsChatSecurity.InvalidLookupResponseException("Unexpected Wynncraft API response");
     }
 
     JsonObject object = root.getAsJsonObject();
     if (!object.has("username")) {
       if (object.has("message")) {
-        throw new IllegalStateException(object.get("message").getAsString());
+        throw new AsChatSecurity.LookupNotFoundException();
       }
 
-      throw new IllegalStateException("Player not found");
+      throw new AsChatSecurity.LookupNotFoundException();
     }
 
     String username = stringValue(object, "username", requestedUsername);
@@ -82,19 +87,24 @@ public class AstLookupClient {
             ? object.getAsJsonObject("restrictions")
             : null;
 
-    return new PlayerSummary(
-        username,
-        guild == null ? "No guild" : stringValue(guild, "name", "No guild"),
-        guild == null ? "-" : stringValue(guild, "rank", "-"),
-        parseInstant(stringValue(object, "lastJoin", "")),
-        stringValue(object, "server", "Offline"),
-        restrictions != null && booleanValue(restrictions, "onlineStatus", false),
-        globalData == null ? 0 : intValue(globalData, "wars"),
-        guildRaids == null ? 0 : intValue(guildRaids, "total"),
-        raidCount(raidList, "Orphion's Nexus of Light"),
-        raidCount(raidList, "The Nameless Anomaly"),
-        raidCount(raidList, "Nest of the Grootslangs"),
-        raidCount(raidList, "The Canyon Colossus"));
+    try {
+      return new PlayerSummary(
+          username,
+          guild == null ? "No guild" : stringValue(guild, "name", "No guild"),
+          guild == null ? "-" : stringValue(guild, "rank", "-"),
+          parseInstant(stringValue(object, "lastJoin", "")),
+          stringValue(object, "server", "Offline"),
+          restrictions != null && booleanValue(restrictions, "onlineStatus", false),
+          globalData == null ? 0 : intValue(globalData, "wars"),
+          guildRaids == null ? 0 : intValue(guildRaids, "total"),
+          raidCount(raidList, "Orphion's Nexus of Light"),
+          raidCount(raidList, "The Nameless Anomaly"),
+          raidCount(raidList, "Nest of the Grootslangs"),
+          raidCount(raidList, "The Canyon Colossus"));
+    } catch (RuntimeException exception) {
+      throw new AsChatSecurity.InvalidLookupResponseException(
+          "Unexpected Wynncraft API response");
+    }
   }
 
   private static int raidCount(JsonObject raidList, String key) {
