@@ -10,7 +10,7 @@ It was built for situations where you do **not** control the Minecraft server, b
 - Adds `/ast` lookups for Wynncraft player, guild, and playtime info
 - Lets players hide shouts, ignore AS chat users, and enable local session logging
 - Supports a client-side word filter GUI through `/asconfig filter`
-- Uses a Wyntils-style `AS7` glyph prefix for chat presentation
+- Uses a Wynntils-style `AS7` glyph prefix for chat presentation
 
 ## How It Works
 
@@ -185,9 +185,9 @@ hello fuck there
 hello **** there
 ```
 
-## Wyntils Text Map
+## Wynntils Text Map
 
-The AS7 prefix uses Wyntils-style private-use glyph characters.
+The AS7 prefix uses Wynntils-style private-use glyph characters.
 
 Current map used by this project:
 
@@ -245,7 +245,7 @@ Which becomes:
 
 ```
 
-If the player is not using the expected Wyntils resources, these may render as unknown glyphs instead of the intended stylized prefix.
+If the player is not using the expected Wynntils resources, these may render as unknown glyphs instead of the intended stylized prefix.
 
 ## Repo Notes
 

@@ -25,9 +25,9 @@ import org.slf4j.LoggerFactory;
 
 public class AsChatClientMod implements ClientModInitializer {
   public static final Logger LOGGER = LoggerFactory.getLogger("aschat");
-  private static final String WYNTILS_AS7 = "\uE040\uE052\uE067";
+  private static final String WYNNTILS_AS7 = "\uE040\uE052\uE067";
   private static final Component PREFIX =
-      Component.literal(WYNTILS_AS7).withStyle(style -> style.withBold(false));
+      Component.literal(WYNNTILS_AS7).withStyle(style -> style.withBold(false));
   private static final Component PREFIX_DIVIDER =
       Component.literal(" > ").withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.BOLD);
 
