@@ -43,6 +43,7 @@ public final class AsChatSessionLog {
       writer =
           Files.newBufferedWriter(
               path, StandardCharsets.UTF_8, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+      restrictOwnerOnly(path);
       writeLine("SESSION", "Started");
       registerShutdownHook();
     } catch (IOException exception) {
@@ -89,11 +90,7 @@ public final class AsChatSessionLog {
   }
 
   private static String sanitize(String message) {
-    if (message == null) {
-      return "";
-    }
-
-    return message.replace('\n', ' ').replace('\r', ' ');
+    return AsChatSecurity.sanitizeInboundText(message);
   }
 
   private static void registerShutdownHook() {
@@ -129,6 +126,17 @@ public final class AsChatSessionLog {
     } catch (NoSuchFileException ignored) {
     } catch (IOException exception) {
       LOGGER.warn("Failed to delete old AS7 session log {}", file, exception);
+    }
+  }
+
+  private static void restrictOwnerOnly(Path file) {
+    try {
+      Files.setPosixFilePermissions(
+          file,
+          java.util.Set.of(
+              java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+              java.nio.file.attribute.PosixFilePermission.OWNER_WRITE));
+    } catch (IOException | UnsupportedOperationException ignored) {
     }
   }
 }

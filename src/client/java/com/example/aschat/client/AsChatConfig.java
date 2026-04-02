@@ -3,8 +3,10 @@ package com.example.aschat.client;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -25,6 +27,7 @@ public final class AsChatConfig {
 
   private final Path path;
   private final String relayUrl;
+  private final AsChatSecurity.RelayEndpoint relayEndpoint;
   private final String authToken;
   private final int pollIntervalTicks;
   private AsChatViewMode viewMode;
@@ -46,6 +49,7 @@ public final class AsChatConfig {
       Set<String> filteredWords) {
     this.path = path;
     this.relayUrl = relayUrl;
+    this.relayEndpoint = AsChatSecurity.relayEndpoint(relayUrl);
     this.authToken = authToken;
     this.pollIntervalTicks = pollIntervalTicks;
     this.viewMode = viewMode;
@@ -82,7 +86,7 @@ public final class AsChatConfig {
     AsChatConfig config =
         new AsChatConfig(
             path,
-            stripTrailingSlash(relayUrl),
+            relayUrl,
             authToken,
             pollIntervalTicks,
             viewMode,
@@ -90,12 +94,26 @@ public final class AsChatConfig {
             chatHistoryEnabled,
             ignoredUsers,
             filteredWords);
-    config.save();
+    if (!config.matchesPersistedProperties(properties)) {
+      config.save();
+    }
     return config;
   }
 
   public String relayUrl() {
     return relayUrl;
+  }
+
+  public boolean hasRelayUrl() {
+    return relayEndpoint.isConfigured();
+  }
+
+  public boolean hasValidRelayEndpoint() {
+    return relayEndpoint.isValid();
+  }
+
+  public AsChatSecurity.RelayEndpoint relayEndpoint() {
+    return relayEndpoint;
   }
 
   public String authToken() {
@@ -238,6 +256,24 @@ public final class AsChatConfig {
   }
 
   private void save() {
+    try {
+      Files.createDirectories(path.getParent());
+      Path tempFile = Files.createTempFile(path.getParent(), "aschat", ".tmp");
+      try {
+        try (OutputStream stream = Files.newOutputStream(tempFile)) {
+          toProperties().store(stream, "AS Chat client config");
+        }
+        restrictOwnerOnly(tempFile);
+        moveIntoPlace(tempFile, path);
+        restrictOwnerOnly(path);
+      } finally {
+        Files.deleteIfExists(tempFile);
+      }
+    } catch (IOException ignored) {
+    }
+  }
+
+  private Properties toProperties() {
     Properties output = new Properties();
     output.setProperty("relay_url", relayUrl);
     output.setProperty("auth_token", authToken);
@@ -247,14 +283,17 @@ public final class AsChatConfig {
     output.setProperty("chat_history", Boolean.toString(chatHistoryEnabled));
     output.setProperty("ignored_users", joinIgnoredUsers());
     output.setProperty("filtered_words", joinFilteredWords());
+    return output;
+  }
 
-    try {
-      Files.createDirectories(path.getParent());
-      try (OutputStream stream = Files.newOutputStream(path)) {
-        output.store(stream, "AS Chat client config");
+  private boolean matchesPersistedProperties(Properties properties) {
+    Properties desired = toProperties();
+    for (String key : desired.stringPropertyNames()) {
+      if (!desired.getProperty(key).equals(properties.getProperty(key))) {
+        return false;
       }
-    } catch (IOException ignored) {
     }
+    return true;
   }
 
   private String joinIgnoredUsers() {
@@ -381,10 +420,6 @@ public final class AsChatConfig {
     return fallback;
   }
 
-  private static String stripTrailingSlash(String value) {
-    return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
-  }
-
   private void rebuildFilteredWordsPattern() {
     filteredWordsPattern = buildFilteredWordsPattern(filteredWords);
   }
@@ -401,5 +436,28 @@ public final class AsChatConfig {
 
     return Pattern.compile(
         "(?i)(?<![\\p{L}\\p{N}_])(" + String.join("|", escapedWords) + ")(?![\\p{L}\\p{N}_])");
+  }
+
+  private static void moveIntoPlace(Path source, Path target) throws IOException {
+    try {
+      Files.move(
+          source,
+          target,
+          StandardCopyOption.ATOMIC_MOVE,
+          StandardCopyOption.REPLACE_EXISTING);
+    } catch (AtomicMoveNotSupportedException ignored) {
+      Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
+    }
+  }
+
+  private static void restrictOwnerOnly(Path file) {
+    try {
+      Files.setPosixFilePermissions(
+          file,
+          java.util.Set.of(
+              java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+              java.nio.file.attribute.PosixFilePermission.OWNER_WRITE));
+    } catch (IOException | UnsupportedOperationException ignored) {
+    }
   }
 }
