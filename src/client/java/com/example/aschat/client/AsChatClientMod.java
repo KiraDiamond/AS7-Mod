@@ -16,25 +16,31 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class AsChatClientMod implements ClientModInitializer {
   public static final Logger LOGGER = LoggerFactory.getLogger("aschat");
-  private static final String WYNNTILS_AS7 = "\uE040\uE052\uE067";
+  private static final String WYNTILS_AS7 = "\uE040\uE052\uE067";
   private static final Component PREFIX =
-      Component.literal(WYNNTILS_AS7).withStyle(style -> style.withBold(false));
+      Component.literal(WYNTILS_AS7).withStyle(style -> style.withBold(false));
   private static final Component PREFIX_DIVIDER =
       Component.literal(" > ").withStyle(ChatFormatting.DARK_GRAY, ChatFormatting.BOLD);
 
   private static AsChatState state;
   private static AstLookupClient astLookupClient;
   private static AsChatRelayClient relayClient;
+  private static AsMapVirtualManager mapVirtualManager;
   private static boolean openFilterScreenPending;
+  private static String pendingPreviewId;
 
   @Override
   public void onInitializeClient() {
@@ -45,6 +51,7 @@ public class AsChatClientMod implements ClientModInitializer {
 
     astLookupClient = new AstLookupClient();
     relayClient = new AsChatRelayClient(state.config());
+    mapVirtualManager = new AsMapVirtualManager();
 
     ClientCommandRegistrationCallback.EVENT.register(
         (dispatcher, registryAccess) -> {
@@ -55,6 +62,16 @@ public class AsChatClientMod implements ClientModInitializer {
                           .executes(
                               context -> {
                                 sendMessage(StringArgumentType.getString(context, "message"));
+                                return 1;
+                              })));
+
+          dispatcher.register(
+              ClientCommandManager.literal("aspreview")
+                  .then(
+                      ClientCommandManager.argument("id", StringArgumentType.word())
+                          .executes(
+                              context -> {
+                                pendingPreviewId = StringArgumentType.getString(context, "id");
                                 return 1;
                               })));
 
@@ -116,6 +133,35 @@ public class AsChatClientMod implements ClientModInitializer {
                                 return 1;
                               }))
                   .then(
+                      ClientCommandManager.literal("image")
+                          .then(
+                              ClientCommandManager.argument("name", StringArgumentType.word())
+                                  .then(
+                                      ClientCommandManager.argument(
+                                              "link", StringArgumentType.greedyString())
+                                          .executes(
+                                              context -> {
+                                                String name =
+                                                    StringArgumentType.getString(context, "name");
+                                                String link =
+                                                    StringArgumentType.getString(context, "link");
+                                                boolean saved =
+                                                    state.setImageAlias(name, link);
+                                                if (!saved) {
+                                                  showSystemMessage(
+                                                      "Image alias failed. Use a-z, 0-9, _ or -"
+                                                          + " for the name, and a valid http/https"
+                                                          + " URL.");
+                                                  return 0;
+                                                }
+
+                                                showSystemMessage(
+                                                    "Saved image alias :"
+                                                        + name.toLowerCase()
+                                                        + ":");
+                                                return 1;
+                                              }))))
+                  .then(
                       ClientCommandManager.literal("ignore")
                           .then(
                               ClientCommandManager.argument("player", StringArgumentType.word())
@@ -153,8 +199,8 @@ public class AsChatClientMod implements ClientModInitializer {
                       context -> {
                         showSystemMessage(
                             "Use /asconfig toggle, /asconfig toggleshouts, /asconfig chathistory,"
-                                + " /asconfig filter, /asconfig ignore <player>, or /asconfig"
-                                + " unignore <player>.");
+                                + " /asconfig filter, /asconfig image <name> <link>, /asconfig"
+                                + " ignore <player>, or /asconfig unignore <player>.");
                         return 1;
                       }));
 
@@ -227,6 +273,12 @@ public class AsChatClientMod implements ClientModInitializer {
 
     ClientTickEvents.END_CLIENT_TICK.register(
         client -> {
+          if (pendingPreviewId != null) {
+            openPreviewScreen(client, pendingPreviewId);
+            pendingPreviewId = null;
+            return;
+          }
+
           if (openFilterScreenPending && client.screen == null) {
             openFilterScreenPending = false;
             client.setScreen(new AsChatFilterScreen(null, state));
@@ -239,6 +291,7 @@ public class AsChatClientMod implements ClientModInitializer {
             return;
           }
 
+          mapVirtualManager.tick(client);
           state.tick(client);
         });
   }
@@ -255,8 +308,24 @@ public class AsChatClientMod implements ClientModInitializer {
       return;
     }
 
-    if (message.length() > 256) {
-      showSystemMessage("AS7 messages can be at most 256 characters.");
+    message = state.expandImageAliases(message);
+
+    try {
+      AsMapEmbedCodec.validateOutgoingMessage(message);
+    } catch (IllegalArgumentException exception) {
+      showSystemMessage(exception.getMessage());
+      return;
+    }
+
+    try {
+      message = WynntilsItemBridge.replaceItemPlaceholders(minecraft, message);
+    } catch (IllegalStateException exception) {
+      showSystemMessage(exception.getMessage());
+      return;
+    }
+
+    if (message.length() > 4096) {
+      showSystemMessage("AS7 messages can be at most 4096 characters.");
       return;
     }
 
@@ -273,9 +342,7 @@ public class AsChatClientMod implements ClientModInitializer {
                 runOnClient(
                     () -> {
                       if (throwable != null) {
-                        showSystemMessage(
-                            "AST guild lookup failed: "
-                                + AsChatSecurity.describeLookupFailure(throwable));
+                        showSystemMessage("AST guild lookup failed: " + rootMessage(throwable));
                         return;
                       }
 
@@ -303,9 +370,7 @@ public class AsChatClientMod implements ClientModInitializer {
                 runOnClient(
                     () -> {
                       if (throwable != null) {
-                        showSystemMessage(
-                            "AST player lookup failed: "
-                                + AsChatSecurity.describeLookupFailure(throwable));
+                        showSystemMessage("AST player lookup failed: " + rootMessage(throwable));
                         return;
                       }
 
@@ -329,9 +394,7 @@ public class AsChatClientMod implements ClientModInitializer {
                 runOnClient(
                     () -> {
                       if (throwable != null) {
-                        showSystemMessage(
-                            "AST playtime lookup failed: "
-                                + AsChatSecurity.describeLookupFailure(throwable));
+                        showSystemMessage("AST playtime lookup failed: " + rootMessage(throwable));
                         return;
                       }
 
@@ -395,9 +458,14 @@ public class AsChatClientMod implements ClientModInitializer {
       return;
     }
 
+    AsMapEmbedCodec.EmbedMatch embedMatch = AsMapEmbedCodec.findFirst(message).orElse(null);
+    if (embedMatch != null) {
+      showRelayImageMessage(sender, message, embedMatch);
+      return;
+    }
+
     String filteredSender = state == null ? sender : state.filterText(sender);
-    String filteredMessage = state == null ? message : state.filterText(message);
-    AsChatSessionLog.log("AS_CHAT", filteredSender + ": " + filteredMessage);
+    AsChatSessionLog.log("AS_CHAT", filteredSender + ": " + message);
     minecraft
         .gui
         .getChat()
@@ -407,7 +475,28 @@ public class AsChatClientMod implements ClientModInitializer {
                 .append(PREFIX_DIVIDER.copy())
                 .append(normalText(sender, ChatFormatting.GREEN))
                 .append(normalText(": ", ChatFormatting.GRAY))
-                .append(normalText(message, ChatFormatting.GREEN)));
+                .append(WynntilsItemBridge.decorateMessage(message, AsChatClientMod::normalText)));
+  }
+
+  private static void showRelayImageMessage(
+      String sender, String message, AsMapEmbedCodec.EmbedMatch embedMatch) {
+    String previewId = mapVirtualManager.registerPreview(embedMatch.embed());
+    String filteredSender = state == null ? sender : state.filterText(sender);
+    String displayMessage = AsMapEmbedCodec.replaceFirstToken(message, "[View Image]");
+    AsChatSessionLog.log("AS_CHAT", filteredSender + ": " + displayMessage);
+
+    Minecraft.getInstance()
+        .gui
+        .getChat()
+        .addMessage(
+            PREFIX
+                .copy()
+                .append(PREFIX_DIVIDER.copy())
+                .append(normalText(sender, ChatFormatting.GREEN))
+                .append(normalText(": ", ChatFormatting.GRAY))
+                .append(buildImageMessageContent(message, embedMatch, previewId)));
+
+    mapVirtualManager.beginRender(previewId, embedMatch.embed());
   }
 
   public static void showInfoLine(String message) {
@@ -463,6 +552,25 @@ public class AsChatClientMod implements ClientModInitializer {
     minecraft.gui.getChat().addMessage(line);
   }
 
+  private static MutableComponent buildImageMessageContent(
+      String originalMessage, AsMapEmbedCodec.EmbedMatch embedMatch, String previewId) {
+    MutableComponent result = Component.empty().withStyle(style -> style.withBold(false));
+    String before = originalMessage.substring(0, embedMatch.start());
+    String after = originalMessage.substring(embedMatch.end());
+
+    if (!before.isEmpty()) {
+      result.append(WynntilsItemBridge.decorateMessage(before, AsChatClientMod::normalText));
+    }
+
+    result.append(mapVirtualManager.createViewComponent(previewId));
+
+    if (!after.isEmpty()) {
+      result.append(WynntilsItemBridge.decorateMessage(after, AsChatClientMod::normalText));
+    }
+
+    return result;
+  }
+
   private static MutableComponent normalText(String text, ChatFormatting... formatting) {
     String filtered = state == null ? text : state.filterText(text);
     return Component.literal(filtered)
@@ -494,6 +602,43 @@ public class AsChatClientMod implements ClientModInitializer {
   public static void runOnClient(Runnable runnable) {
     Minecraft client = Minecraft.getInstance();
     client.execute(runnable);
+  }
+
+  public static boolean renderCustomHoverEffect(
+      GuiGraphics guiGraphics, Style style, int mouseX, int mouseY) {
+    if (WynntilsItemBridge.renderCustomHover(guiGraphics, style, mouseX, mouseY)) {
+      return true;
+    }
+
+    return mapVirtualManager != null
+        && mapVirtualManager.renderHoverPreview(guiGraphics, style, mouseX, mouseY);
+  }
+
+  private static void openPreviewScreen(Minecraft client, String previewId) {
+    String status = mapVirtualManager.previewStatusMessage(previewId);
+    if (status != null) {
+      showSystemMessage(status);
+      return;
+    }
+
+    AsMapPreviewScreen previewScreen =
+        mapVirtualManager.createPreviewScreen(client.screen, previewId);
+    if (previewScreen == null) {
+      showSystemMessage("AS7 image preview is no longer available.");
+      return;
+    }
+
+    client.setScreen(previewScreen);
+  }
+
+  public static String rootMessage(Throwable throwable) {
+    Throwable current = throwable;
+    while (current.getCause() != null) {
+      current = current.getCause();
+    }
+
+    String message = current.getMessage();
+    return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
   }
 
   private static String formatSince(Instant instant) {

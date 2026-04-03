@@ -8,8 +8,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.StringJoiner;
@@ -24,6 +27,8 @@ public final class AsChatConfig {
   private static final AsChatViewMode DEFAULT_VIEW_MODE = AsChatViewMode.BOTH;
   private static final boolean DEFAULT_HIDE_SHOUTS = false;
   private static final boolean DEFAULT_CHAT_HISTORY = false;
+  private static final String IMAGE_ALIAS_PREFIX = "image_alias.";
+  private static final Pattern IMAGE_ALIAS_TOKEN_PATTERN = Pattern.compile(":([A-Za-z0-9_-]+):");
 
   private final Path path;
   private final String relayUrl;
@@ -35,6 +40,7 @@ public final class AsChatConfig {
   private boolean chatHistoryEnabled;
   private final Set<String> ignoredUsers;
   private final Set<String> filteredWords;
+  private final Map<String, String> imageAliases;
   private Pattern filteredWordsPattern;
 
   private AsChatConfig(
@@ -46,7 +52,8 @@ public final class AsChatConfig {
       boolean hideShouts,
       boolean chatHistoryEnabled,
       Set<String> ignoredUsers,
-      Set<String> filteredWords) {
+      Set<String> filteredWords,
+      Map<String, String> imageAliases) {
     this.path = path;
     this.relayUrl = relayUrl;
     this.relayEndpoint = AsChatSecurity.relayEndpoint(relayUrl);
@@ -57,6 +64,7 @@ public final class AsChatConfig {
     this.chatHistoryEnabled = chatHistoryEnabled;
     this.ignoredUsers = ignoredUsers;
     this.filteredWords = filteredWords;
+    this.imageAliases = imageAliases;
     this.filteredWordsPattern = buildFilteredWordsPattern(filteredWords);
   }
 
@@ -82,6 +90,7 @@ public final class AsChatConfig {
         parseBoolean(properties.getProperty("chat_history"), DEFAULT_CHAT_HISTORY);
     Set<String> ignoredUsers = parseIgnoredUsers(properties.getProperty("ignored_users"));
     Set<String> filteredWords = parseFilteredWords(properties.getProperty("filtered_words"));
+    Map<String, String> imageAliases = parseImageAliases(properties);
 
     AsChatConfig config =
         new AsChatConfig(
@@ -93,7 +102,8 @@ public final class AsChatConfig {
             hideShouts,
             chatHistoryEnabled,
             ignoredUsers,
-            filteredWords);
+            filteredWords,
+            imageAliases);
     if (!config.matchesPersistedProperties(properties)) {
       config.save();
     } else if (Files.exists(path)) {
@@ -257,6 +267,49 @@ public final class AsChatConfig {
     return result.toString();
   }
 
+  public boolean setImageAlias(String alias, String url) {
+    String normalizedAlias = normalizeImageAlias(alias);
+    if (normalizedAlias.isEmpty()) {
+      return false;
+    }
+
+    String normalizedUrl;
+    try {
+      normalizedUrl = AsMapEmbedCodec.normalizeOutgoingImageUrl(url);
+    } catch (IllegalArgumentException exception) {
+      return false;
+    }
+
+    String previous = imageAliases.put(normalizedAlias, normalizedUrl);
+    if (!normalizedUrl.equals(previous)) {
+      save();
+    }
+    return true;
+  }
+
+  public String expandImageAliases(String text) {
+    if (text == null || text.isEmpty() || imageAliases.isEmpty()) {
+      return text;
+    }
+
+    Matcher matcher = IMAGE_ALIAS_TOKEN_PATTERN.matcher(text);
+    StringBuilder result = new StringBuilder();
+    boolean replaced = false;
+    while (matcher.find()) {
+      String alias = normalizeImageAlias(matcher.group(1));
+      String url = imageAliases.get(alias);
+      if (url == null) {
+        matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group()));
+        continue;
+      }
+
+      matcher.appendReplacement(result, Matcher.quoteReplacement("asmap:" + url));
+      replaced = true;
+    }
+    matcher.appendTail(result);
+    return replaced ? result.toString() : text;
+  }
+
   private void save() {
     try {
       Files.createDirectories(path.getParent());
@@ -285,6 +338,9 @@ public final class AsChatConfig {
     output.setProperty("chat_history", Boolean.toString(chatHistoryEnabled));
     output.setProperty("ignored_users", joinIgnoredUsers());
     output.setProperty("filtered_words", joinFilteredWords());
+    for (Map.Entry<String, String> entry : imageAliases.entrySet()) {
+      output.setProperty(IMAGE_ALIAS_PREFIX + entry.getKey(), entry.getValue());
+    }
     return output;
   }
 
@@ -348,6 +404,27 @@ public final class AsChatConfig {
     return words;
   }
 
+  private static Map<String, String> parseImageAliases(Properties properties) {
+    Map<String, String> aliases = new LinkedHashMap<>();
+    for (String key : properties.stringPropertyNames()) {
+      if (!key.startsWith(IMAGE_ALIAS_PREFIX)) {
+        continue;
+      }
+
+      String alias = normalizeImageAlias(key.substring(IMAGE_ALIAS_PREFIX.length()));
+      if (alias.isEmpty()) {
+        continue;
+      }
+
+      String rawUrl = properties.getProperty(key);
+      try {
+        aliases.put(alias, AsMapEmbedCodec.normalizeOutgoingImageUrl(rawUrl));
+      } catch (IllegalArgumentException ignored) {
+      }
+    }
+    return aliases;
+  }
+
   private static String normalizeUsername(String value) {
     return value == null ? "" : value.trim().toLowerCase();
   }
@@ -364,6 +441,31 @@ public final class AsChatConfig {
 
     for (int index = 0; index < trimmed.length(); index++) {
       if (Character.isWhitespace(trimmed.charAt(index))) {
+        return "";
+      }
+    }
+
+    return trimmed;
+  }
+
+  private static String normalizeImageAlias(String value) {
+    if (value == null) {
+      return "";
+    }
+
+    String trimmed = value.trim().toLowerCase(Locale.ROOT);
+    if (trimmed.isEmpty()) {
+      return "";
+    }
+
+    for (int index = 0; index < trimmed.length(); index++) {
+      char character = trimmed.charAt(index);
+      boolean valid =
+          (character >= 'a' && character <= 'z')
+              || (character >= '0' && character <= '9')
+              || character == '_'
+              || character == '-';
+      if (!valid) {
         return "";
       }
     }

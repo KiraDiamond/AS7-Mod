@@ -69,6 +69,14 @@ public class AsChatState {
     return config.filterText(text);
   }
 
+  public boolean setImageAlias(String alias, String url) {
+    return config.setImageAlias(alias, url);
+  }
+
+  public String expandImageAliases(String text) {
+    return config.expandImageAliases(text);
+  }
+
   public boolean ignoreUser(String username) {
     rememberUsername(username);
     return config.ignoreUser(username);

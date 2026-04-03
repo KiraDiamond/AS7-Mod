@@ -5,10 +5,11 @@
 	"name": "AS Chat",
 	"description": "Adds a client-only /as channel that relays through an external AS Chat service.",
 	"authors": [
-		"Codex"
+		"Codex",
+		"Topdiamond2006"
 	],
 	"contact": {
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
+		"sources": "https://github.com/KiraDiamond/AS7-Mod"
 	},
 	"license": "CC0-1.0",
 	"environment": "client",
@@ -17,6 +18,9 @@
 			"com.example.aschat.client.AsChatClientMod"
 		]
 	},
+	"mixins": [
+		"aschat.client.mixins.json"
+	],
 	"depends": {
 		"fabricloader": ">=0.18.1",
 		"minecraft": "~1.21.11",
