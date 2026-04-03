@@ -99,3 +99,16 @@ relay_url=
 - No live relay IPs are committed here.
 - No packaged jars are committed here.
 - No local deployment or private config files are included here.
+
+## Commit Style
+
+This repository uses Conventional Commits for future changes.
+
+Examples:
+
+```text
+feat: add image alias expansion for /as
+fix: restore Wynntils item name decoding
+docs: document build and config requirements
+ci: use Java 21 in GitHub Actions
+```
